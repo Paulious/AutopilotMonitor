@@ -581,6 +581,22 @@ jobs:
       # Verified against the STAGING copy -- the exact bytes that ship. The invariant is "every
       # AutopilotMonitor PE in the ZIP is signed", so a project added later cannot ride along
       # unsigned. A missing timestamp fails too: without it the signature dies with the cert.
+      # LAB ONLY (self-signed signing certificate). 'Valid' in the two verification steps below needs a
+      # trusted chain, and a GitHub runner does not trust our lab certificate. Download the PUBLIC part from
+      # the signing vault (Key Vault Certificate User is enough; no private key) and trust it on THIS runner.
+      # Delete this step when the pipeline signs with a publicly trusted certificate.
+      - name: Trust the lab signing certificate on this runner (self-signed lab route)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vault = ([Uri]$env:CODE_SIGN_KEY_VAULT_URL).Host.Split('.')[0]
+          $cer = Join-Path $env:RUNNER_TEMP 'lab-signing.cer'
+          az keyvault certificate download --vault-name $vault --name $env:CODE_SIGN_CERTIFICATE_NAME --file $cer --encoding DER --only-show-errors
+          if ($LASTEXITCODE -ne 0) { throw "Could not download the public signing certificate from $vault. The pipeline identity needs 'Key Vault Certificate User' on that vault." }
+          $c = Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root
+          Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+          Write-Host "Trusted on this runner: $($c.Subject) [$($c.Thumbprint)]"
+
       - name: Verify Authenticode signatures
         shell: pwsh
         run: |
